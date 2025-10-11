@@ -112,15 +112,15 @@ class SparkConfigDialog(tk.Toplevel):
             ttk.Button(row, text="Chọn...", command=lambda v=var, c=command: c(v), bootstyle="info-outline").pack(side=LEFT)
 
     def _pick_csv_file(self, var):
-        path = filedialog.askopenfilename(filetypes=[("CSV", "*.csv"), ("Tất cả", "*.*")])
+        path = filedialog.askopenfilename(parent=self, filetypes=[("CSV", "*.csv"), ("Tất cả", "*.*")])
         if path: var.set(path)
 
     def _pick_txt_file(self, var):
-        path = filedialog.askopenfilename(filetypes=[("Text", "*.txt"), ("Tất cả", "*.*")])
+        path = filedialog.askopenfilename(parent=self, filetypes=[("Text", "*.txt"), ("Tất cả", "*.*")])
         if path: var.set(path)
 
     def _pick_directory(self, var):
-        path = filedialog.askdirectory()
+        path = filedialog.askdirectory(parent=self)
         if path: var.set(path)
 
     def _on_submit(self):
