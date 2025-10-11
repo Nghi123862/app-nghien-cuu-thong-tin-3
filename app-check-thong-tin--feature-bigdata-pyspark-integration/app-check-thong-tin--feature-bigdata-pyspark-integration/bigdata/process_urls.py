@@ -117,7 +117,13 @@ def main():
     violated_urls_df = urls_to_check_df.join(
         broadcast(keywords_df),
         urls_to_check_df.processed_url.contains(keywords_df.keyword)
-    ).select(urls_df["url"], urls_df["date"]).distinct()
+    )
+
+    # Select columns conditionally based on the presence of a 'date' column
+    if "date" in urls_df.columns:
+        violated_urls_df = violated_urls_df.select(urls_df["url"], urls_df["date"]).distinct()
+    else:
+        violated_urls_df = violated_urls_df.select(urls_df["url"]).distinct()
 
     # Save the results
     try:
