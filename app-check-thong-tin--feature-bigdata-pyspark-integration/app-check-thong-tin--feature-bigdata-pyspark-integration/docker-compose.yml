@@ -2,7 +2,7 @@ services:
   app:
     build:
       context: .
-      dockerfile: app-check-thong-tin--feature-bigdata-pyspark-integration/Dockerfile
+      dockerfile: Dockerfile
     container_name: app-check-thong-tin
     environment:
       - TZ=Etc/UTC
@@ -11,6 +11,6 @@ services:
       - "6080:6080"  # noVNC (open in browser)
       - "5901:5901"  # VNC (optional)
     volumes:
-      - ./app-check-thong-tin--feature-bigdata-pyspark-integration/data:/app/data
-      - ./app-check-thong-tin--feature-bigdata-pyspark-integration/bigdata:/app/bigdata
+      - ./data:/app/data
+      - ./bigdata:/app/bigdata
     restart: unless-stopped
