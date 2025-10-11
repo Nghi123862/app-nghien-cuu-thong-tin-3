@@ -20,7 +20,7 @@ RUN wget https://archive.apache.org/dist/spark/spark-4.0.1/spark-4.0.1-bin-hadoo
 # Create and populate Python virtual environment
 RUN python3 -m venv /opt/venv
 ENV PATH="/opt/venv/bin:${PATH}"
-COPY app-check-thong-tin--feature-bigdata-pyspark-integration/app-check-thong-tin--feature-bigdata-pyspark-integration/requirements.txt requirements.txt
+COPY requirements.txt requirements.txt
 RUN pip install --upgrade pip && pip install -r requirements.txt
 
 
@@ -67,7 +67,7 @@ RUN echo "spark.driver.extraJavaOptions -Dio.netty.tryReflectionSetAccessible=tr
 
 # Set up the application directory
 WORKDIR ${APP_HOME}
-COPY app-check-thong-tin--feature-bigdata-pyspark-integration/app-check-thong-tin--feature-bigdata-pyspark-integration/. ${APP_HOME}/
+COPY . ${APP_HOME}/
 COPY --chown=${USER_NAME}:${USER_NAME} docker/start.sh /usr/local/bin/start.sh
 RUN chmod +x /usr/local/bin/start.sh
 
