@@ -1,8 +1,13 @@
 import tkinter as tk
 from tkinter import filedialog, messagebox
-from typing import Any
+from typing import Any, Dict, Optional
 import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
+import subprocess
+import sys
+import os
+import threading
+import queue
 
 try:
     from detectors import analyze_url, analyze_text, analyze_file
@@ -12,6 +17,133 @@ except Exception:
     from detectors.text_detector import analyze_text  # type: ignore
     from detectors.file_detector import analyze_file  # type: ignore
 
+class SparkJobManager(threading.Thread):
+    """
+    Manages the execution of the Spark job in a separate thread to avoid freezing the UI.
+    Communicates with the UI thread via a queue.
+    """
+    def __init__(self, config: Dict[str, str], ui_queue: queue.Queue):
+        super().__init__()
+        self.config = config
+        self.ui_queue = ui_queue
+        self.daemon = True
+
+    def run(self) -> None:
+        script_path = os.path.join(os.path.dirname(__file__), 'bigdata', 'process_urls.py')
+
+        args = [sys.executable, script_path]
+        if self.config.get("urls"):
+            args += ["--urls", self.config["urls"]]
+        if self.config.get("keywords"):
+            args += ["--keywords", self.config["keywords"]]
+        if self.config.get("output"):
+            args += ["--output", self.config["output"]]
+        if self.config.get("master"):
+            args += ["--master", self.config["master"]]
+
+        try:
+            self.ui_queue.put(("status", "Bắt đầu chạy Spark job..."))
+            proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', bufsize=1)
+
+            for line in iter(proc.stdout.readline, ''):
+                self.ui_queue.put(("log", line.rstrip()))
+
+            proc.stdout.close()
+            code = proc.wait()
+
+            if code == 0:
+                self.ui_queue.put(("status", f"Hoàn thành! Kết quả được lưu tại:\n{self.config['output']}"))
+                self.ui_queue.put(("done", "success"))
+            else:
+                self.ui_queue.put(("status", f"Spark job kết thúc với mã lỗi {code}."))
+                self.ui_queue.put(("done", "error"))
+
+        except FileNotFoundError:
+            self.ui_queue.put(("status", "Lỗi: Không tìm thấy file script `process_urls.py`."))
+            self.ui_queue.put(("done", "error"))
+        except Exception as e:
+            self.ui_queue.put(("status", f"Lỗi không xác định khi chạy Spark: {e}"))
+            self.ui_queue.put(("done", "error"))
+
+
+class SparkConfigDialog(tk.Toplevel):
+    """A dialog for configuring the Spark job parameters."""
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.title("Cấu hình Spark Job")
+        self.geometry("600x250")
+        self.transient(parent)
+        self.grab_set()
+
+        self.config: Optional[Dict[str, str]] = None
+
+        main_frame = ttk.Frame(self, padding=15)
+        main_frame.pack(fill=BOTH, expand=YES)
+
+        # URLs
+        self.urls_var = tk.StringVar()
+        self._create_row(main_frame, "CSV URLs (có cột 'url'):", self.urls_var, self._pick_csv_file)
+
+        # Keywords
+        self.keywords_var = tk.StringVar()
+        self._create_row(main_frame, "Từ khóa vi phạm (.txt):", self.keywords_var, self._pick_txt_file)
+
+        # Output
+        self.output_var = tk.StringVar()
+        self._create_row(main_frame, "Thư mục xuất kết quả:", self.output_var, self._pick_directory)
+
+        # Master
+        self.master_var = tk.StringVar()
+        self._create_row(main_frame, "Spark master (tùy chọn):", self.master_var, None)
+
+        # Buttons
+        btn_frame = ttk.Frame(main_frame, padding=(0, 10))
+        btn_frame.pack(fill=X)
+        ttk.Button(btn_frame, text="Chạy", command=self._on_submit, bootstyle="success").pack(side=RIGHT, padx=5)
+        ttk.Button(btn_frame, text="Hủy", command=self.destroy, bootstyle="secondary").pack(side=RIGHT)
+
+    def _create_row(self, parent, label_text, var, command):
+        row = ttk.Frame(parent)
+        row.pack(fill=X, pady=4)
+        ttk.Label(row, text=label_text, width=20).pack(side=LEFT)
+        entry = ttk.Entry(row, textvariable=var)
+        entry.pack(side=LEFT, fill=X, expand=YES, padx=5)
+        if command:
+            ttk.Button(row, text="Chọn...", command=lambda v=var, c=command: c(v), bootstyle="info-outline").pack(side=LEFT)
+
+    def _pick_csv_file(self, var):
+        path = filedialog.askopenfilename(filetypes=[("CSV", "*.csv"), ("Tất cả", "*.*")])
+        if path: var.set(path)
+
+    def _pick_txt_file(self, var):
+        path = filedialog.askopenfilename(filetypes=[("Text", "*.txt"), ("Tất cả", "*.*")])
+        if path: var.set(path)
+
+    def _pick_directory(self, var):
+        path = filedialog.askdirectory()
+        if path: var.set(path)
+
+    def _on_submit(self):
+        urls = self.urls_var.get().strip()
+        keywords = self.keywords_var.get().strip()
+        output = self.output_var.get().strip()
+
+        if not all([urls, keywords, output]):
+            messagebox.showwarning("Thiếu thông tin", "Vui lòng cung cấp đủ đường dẫn cho URLs, Keywords, và Output.", parent=self)
+            return
+
+        self.config = {
+            "urls": urls,
+            "keywords": keywords,
+            "output": output,
+            "master": self.master_var.get().strip()
+        }
+        self.destroy()
+
+    def wait_for_config(self) -> Optional[Dict[str, str]]:
+        self.wait_window()
+        return self.config
+
 
 class App(ttk.Window):
     def __init__(self) -> None:
@@ -19,6 +151,10 @@ class App(ttk.Window):
         super().__init__(themename="superhero")
         self.title("Công Cụ Giám Sát Nội Dung Vi Phạm & Tin Giả")
         self.geometry("900x700")
+
+        self.spark_job: Optional[SparkJobManager] = None
+        self.spark_queue = queue.Queue()
+
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -85,54 +221,26 @@ class App(ttk.Window):
         self.file_result.configure(state='disabled')
 
     def _build_bigdata_tab(self, parent: ttk.Frame) -> None:
-        # Inputs row
-        row1 = ttk.Frame(parent)
-        row1.pack(fill=X, pady=(0, 8))
-        ttk.Label(row1, text="CSV URLs (có cột 'url'):").pack(side=LEFT)
-        self.bd_urls_var = tk.StringVar()
-        ttk.Entry(row1, textvariable=self.bd_urls_var).pack(side=LEFT, fill=X, expand=YES, padx=8)
-        ttk.Button(row1, text="Chọn...", bootstyle="info", command=self._on_pick_bd_urls).pack(side=LEFT)
+        # Top control frame
+        control_frame = ttk.Frame(parent)
+        control_frame.pack(fill=X, pady=(0, 10))
 
-        row2 = ttk.Frame(parent)
-        row2.pack(fill=X, pady=(0, 8))
-        ttk.Label(row2, text="Từ khóa vi phạm (.txt):").pack(side=LEFT)
-        self.bd_keywords_var = tk.StringVar()
-        ttk.Entry(row2, textvariable=self.bd_keywords_var).pack(side=LEFT, fill=X, expand=YES, padx=8)
-        ttk.Button(row2, text="Chọn...", bootstyle="info", command=self._on_pick_bd_keywords).pack(side=LEFT)
+        self.bd_run_button = ttk.Button(control_frame, text="Cấu hình và Chạy Job", bootstyle="success", command=self._on_run_bigdata)
+        self.bd_run_button.pack(side=LEFT, ipady=4)
 
-        row3 = ttk.Frame(parent)
-        row3.pack(fill=X, pady=(0, 8))
-        ttk.Label(row3, text="Thư mục xuất kết quả:").pack(side=LEFT)
-        self.bd_output_var = tk.StringVar()
-        ttk.Entry(row3, textvariable=self.bd_output_var).pack(side=LEFT, fill=X, expand=YES, padx=8)
-        ttk.Button(row3, text="Chọn...", bootstyle="info", command=self._on_pick_bd_output).pack(side=LEFT)
+        self.bd_status_label = ttk.Label(control_frame, text="  Trạng thái: Sẵn sàng", anchor=W)
+        self.bd_status_label.pack(side=LEFT, fill=X, expand=YES, padx=10)
 
-        row4 = ttk.Frame(parent)
-        row4.pack(fill=X, pady=(0, 8))
-        ttk.Label(row4, text="Spark master (tùy chọn):").pack(side=LEFT)
-        self.bd_master_var = tk.StringVar()
-        ttk.Entry(row4, textvariable=self.bd_master_var).pack(side=LEFT, fill=X, expand=YES, padx=8)
+        # Progress bar
+        self.bd_progress = ttk.Progressbar(parent, mode='indeterminate', length=100)
+        self.bd_progress.pack(fill=X, pady=(0, 5))
 
-        ttk.Button(parent, text="Chạy xử lý với Spark", bootstyle="success", command=self._on_run_bigdata).pack(anchor=W, pady=6)
-
-        self.bd_log = ttk.Text(parent, height=18, font="-size 10", wrap="word", relief=FLAT)
+        # Log area
+        log_frame = ttk.Labelframe(parent, text="Logs", padding=10)
+        log_frame.pack(fill=BOTH, expand=YES)
+        self.bd_log = ttk.Text(log_frame, height=18, font="-size 10", wrap="word", relief=FLAT)
         self.bd_log.pack(fill=BOTH, expand=YES)
         self.bd_log.configure(state='disabled')
-
-    def _on_pick_bd_urls(self) -> None:
-        path = filedialog.askopenfilename(filetypes=[("CSV", "*.csv"), ("Tất cả", "*.*")])
-        if path:
-            self.bd_urls_var.set(path)
-
-    def _on_pick_bd_keywords(self) -> None:
-        path = filedialog.askopenfilename(filetypes=[("Text", "*.txt"), ("Tất cả", "*.*")])
-        if path:
-            self.bd_keywords_var.set(path)
-
-    def _on_pick_bd_output(self) -> None:
-        path = filedialog.askdirectory()
-        if path:
-            self.bd_output_var.set(path)
 
     def _append_bd_log(self, text: str) -> None:
         self.bd_log.configure(state='normal')
@@ -141,43 +249,45 @@ class App(ttk.Window):
         self.bd_log.configure(state='disabled')
 
     def _on_run_bigdata(self) -> None:
-        import subprocess, sys, shlex, os
-        script_path = os.path.join(os.path.dirname(__file__), 'bigdata', 'process_urls.py')
-        urls = self.bd_urls_var.get().strip()
-        keywords = self.bd_keywords_var.get().strip()
-        output = self.bd_output_var.get().strip()
-        master = self.bd_master_var.get().strip()
+        dialog = SparkConfigDialog(self)
+        config = dialog.wait_for_config()
 
-        args = [sys.executable, script_path]
-        if urls:
-            args += ["--urls", urls]
-        if keywords:
-            args += ["--keywords", keywords]
-        if output:
-            args += ["--output", output]
-        if master:
-            args += ["--master", master]
+        if not config:
+            return
 
+        self.bd_run_button.configure(state='disabled')
+        self.bd_status_label.configure(text="  Trạng thái: Đang chạy...")
+        self.bd_progress.start()
+
+        # Clear previous logs
         self.bd_log.configure(state='normal')
         self.bd_log.delete("1.0", tk.END)
         self.bd_log.configure(state='disabled')
-        self._append_bd_log("Bắt đầu chạy Spark job...")
 
+        self.spark_job = SparkJobManager(config, self.spark_queue)
+        self.spark_job.start()
+        self.after(100, self._check_spark_queue)
+
+    def _check_spark_queue(self) -> None:
         try:
-            # Use text mode and line-buffered output for real-time logs
-            proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
-            for line in iter(proc.stdout.readline, ''):
-                self._append_bd_log(line.rstrip())
-            proc.stdout.close()
-            code = proc.wait()
-            if code == 0:
-                self._append_bd_log("Hoàn thành.")
-                messagebox.showinfo("Spark", "Xử lý Big Data hoàn tất")
-            else:
-                self._append_bd_log(f"Spark job kết thúc với mã {code}")
-                messagebox.showerror("Spark", f"Lỗi khi chạy Spark (mã {code})")
-        except Exception as e:
-            messagebox.showerror("Spark", f"Không thể chạy Spark: {e}")
+            while True:
+                message_type, data = self.spark_queue.get_nowait()
+                if message_type == "log":
+                    self._append_bd_log(data)
+                elif message_type == "status":
+                    self.bd_status_label.configure(text=f"  Trạng thái: {data}")
+                elif message_type == "done":
+                    self.bd_progress.stop()
+                    self.bd_run_button.configure(state='normal')
+                    if data == "success":
+                        messagebox.showinfo("Thành công", "Xử lý Big Data hoàn tất!")
+                    else:
+                        messagebox.showerror("Lỗi", "Đã có lỗi xảy ra trong quá trình xử lý. Vui lòng kiểm tra logs.")
+                    return # Stop polling
+        except queue.Empty:
+            pass # No new messages
+
+        self.after(100, self._check_spark_queue)
 
     def _on_check_url(self) -> None:
         url = self.url_var.get().strip()
