@@ -1,5 +1,31 @@
 # syntax=docker/dockerfile:1
-# Base: lightweight Ubuntu with Python 3.11 and Java 17
+
+# --- Builder Stage ---
+# Used to install dependencies and build artifacts, keeping the final image small.
+FROM ubuntu:22.04 AS builder
+
+# Install build-time dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3-venv \
+    wget \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Spark 4.0.1
+RUN wget https://archive.apache.org/dist/spark/spark-4.0.1/spark-4.0.1-bin-hadoop3.tgz -O /tmp/spark.tgz \
+    && mkdir -p /opt/spark \
+    && tar -xzf /tmp/spark.tgz -C /opt/spark --strip-components=1 \
+    && rm /tmp/spark.tgz
+
+# Create and populate Python virtual environment
+RUN python3 -m venv /opt/venv
+ENV PATH="/opt/venv/bin:${PATH}"
+COPY app-check-thong-tin--feature-bigdata-pyspark-integration/app-check-thong-tin--feature-bigdata-pyspark-integration/requirements.txt requirements.txt
+RUN pip install --upgrade pip && pip install -r requirements.txt
+
+
+# --- Final Stage ---
+# The final, lean image for running the application.
 FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -12,35 +38,22 @@ ENV DEBIAN_FRONTEND=noninteractive \
     USER_NAME=developer \
     USER_HOME=/home/developer
 
-# Install system dependencies: Python, Java 17, X11, Xfce, VNC, noVNC, fonts
+# Install only runtime dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 python3-venv python3-pip \
+    python3 \
     openjdk-17-jre-headless \
-    ca-certificates curl wget git \
     xauth dbus-x11 xfce4 xfce4-goodies \
     tigervnc-standalone-server \
     novnc websockify \
     xfonts-base fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Spark 4.0.1
-RUN wget https://archive.apache.org/dist/spark/spark-4.0.1/spark-4.0.1-bin-hadoop3.tgz -O /tmp/spark.tgz \
-    && tar -xzf /tmp/spark.tgz -C /opt/ \
-    && mv /opt/spark-4.0.1-bin-hadoop3 /opt/spark \
-    && rm /tmp/spark.tgz
-
-# Create user and workspace
+# Create non-root user
 RUN useradd -m -s /bin/bash ${USER_NAME}
-WORKDIR ${APP_HOME}
 
-# Copy project files (fixing the nested directory issue)
-COPY app-check-thong-tin--feature-bigdata-pyspark-integration/app-check-thong-tin--feature-bigdata-pyspark-integration/. ${APP_HOME}/
-
-# Create virtualenv and install Python dependencies
-RUN python3 -m venv /opt/venv \
-    && . /opt/venv/bin/activate \
-    && pip install --upgrade pip \
-    && pip install -r requirements.txt
+# Copy artifacts from the builder stage
+COPY --from=builder /opt/venv /opt/venv
+COPY --from=builder /opt/spark /opt/spark
 
 # Set Environment Variables for Java, Spark, and Python
 ENV JAVA_HOME="/usr/lib/jvm/java-17-openjdk-amd64" \
@@ -52,15 +65,17 @@ ENV JAVA_HOME="/usr/lib/jvm/java-17-openjdk-amd64" \
 RUN echo "spark.driver.extraJavaOptions -Dio.netty.tryReflectionSetAccessible=true" > ${SPARK_HOME}/conf/spark-defaults.conf \
     && echo "spark.executor.extraJavaOptions -Dio.netty.tryReflectionSetAccessible=true" >> ${SPARK_HOME}/conf/spark-defaults.conf
 
-# Create lightweight Xfce session and VNC startup script
+# Set up the application directory
+WORKDIR ${APP_HOME}
+COPY app-check-thong-tin--feature-bigdata-pyspark-integration/app-check-thong-tin--feature-bigdata-pyspark-integration/. ${APP_HOME}/
+COPY --chown=${USER_NAME}:${USER_NAME} docker/start.sh /usr/local/bin/start.sh
+RUN chmod +x /usr/local/bin/start.sh
+
+# Create lightweight Xfce session and set permissions
 RUN mkdir -p ${USER_HOME}/.vnc \
     && echo "#!/bin/bash\nstartxfce4 &" > ${USER_HOME}/.vnc/xstartup \
     && chmod +x ${USER_HOME}/.vnc/xstartup \
-    && chown -R ${USER_NAME}:${USER_NAME} ${USER_HOME}
-
-# Startup scripts
-COPY --chown=${USER_NAME}:${USER_NAME} docker/start.sh /usr/local/bin/start.sh
-RUN chmod +x /usr/local/bin/start.sh
+    && chown -R ${USER_NAME}:${USER_NAME} ${USER_HOME} ${APP_HOME}
 
 # Expose VNC and noVNC ports
 EXPOSE ${VNC_PORT} ${NOVNC_PORT}
