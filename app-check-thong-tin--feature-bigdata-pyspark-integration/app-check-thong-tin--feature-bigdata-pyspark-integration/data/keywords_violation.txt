@@ -1,0 +1,12 @@
+# Vietnamese seed violation keywords (expand later)
+# one per line, case-insensitive match guidance in code
+lừa đảo
+bạo lực
+đồi trụy
+kích động
+thù hằn
+khủng bố
+phỉ báng
+xuyên tạc
+kích dục
+khiêu dâm

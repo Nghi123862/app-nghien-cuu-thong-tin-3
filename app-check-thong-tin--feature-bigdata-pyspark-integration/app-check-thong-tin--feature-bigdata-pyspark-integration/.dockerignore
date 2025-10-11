@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+.eggs/
+
+# Virtual envs
+.venv/
+venv/
+ENV/
+
+# Logs and temp
+*.log
+*.tmp
+*.swp
+.DS_Store
+
+# VCS
+.git/
+.gitignore
+
+# Build artifacts
+build/
+dist/
+
+# Spark outputs
+app-check-thong-tin--feature-bigdata-pyspark-integration/bigdata/violated_urls.csv/

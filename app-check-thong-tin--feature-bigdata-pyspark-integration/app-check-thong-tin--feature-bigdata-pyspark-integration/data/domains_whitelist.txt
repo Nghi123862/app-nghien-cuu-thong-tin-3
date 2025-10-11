@@ -1,0 +1,13 @@
+# Trusted sources (examples) - extend as needed
+chinhphu.vn
+moit.gov.vn
+moh.gov.vn
+vnexpress.net
+tuoitre.vn
+thanhnien.vn
+vov.vn
+vietnamnet.vn
+bbc.com
+reuters.com
+apnews.com
+nasa.gov

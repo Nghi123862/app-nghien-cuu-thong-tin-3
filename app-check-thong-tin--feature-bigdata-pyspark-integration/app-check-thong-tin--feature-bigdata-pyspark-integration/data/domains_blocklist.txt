@@ -1,0 +1,4 @@
+# Seed suspicious/fake-news domains (examples)
+example-fake-news.com
+hoax-example.net
+scam-site.test
