@@ -41,6 +41,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 # Install only runtime dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
+    python3-tk \
     openjdk-17-jre-headless \
     xauth dbus-x11 xfce4 xfce4-goodies \
     tigervnc-standalone-server \
