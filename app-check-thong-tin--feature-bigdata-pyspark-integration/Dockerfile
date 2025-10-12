@@ -74,9 +74,15 @@ RUN chmod +x /usr/local/bin/start.sh
 
 # Create lightweight Xfce session and set permissions
 RUN mkdir -p ${USER_HOME}/.vnc \
-    && echo "#!/bin/bash\nstartxfce4 &" > ${USER_HOME}/.vnc/xstartup \
+    && echo -e '#!/bin/bash\n\
+unset SESSION_MANAGER\n\
+unset DBUS_SESSION_BUS_ADDRESS\n\
+/usr/bin/startxfce4 &\n\
+sleep 5\n\
+cd /app\n\
+/opt/venv/bin/python /app/app.py' > ${USER_HOME}/.vnc/xstartup \
     && chmod +x ${USER_HOME}/.vnc/xstartup \
-    && chown -R ${USER_NAME}:${USER_NAME} ${USER_HOME} ${APP_HOME}
+    && chown -R ${USER_NAME}:${USER_NAME} ${USER_HOME}
 
 # Expose VNC and noVNC ports
 EXPOSE ${VNC_PORT} ${NOVNC_PORT}
