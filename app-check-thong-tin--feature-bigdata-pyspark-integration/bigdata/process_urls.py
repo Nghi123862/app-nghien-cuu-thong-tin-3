@@ -1,7 +1,12 @@
 import os
 import argparse
-from pyspark.sql import SparkSession
-from pyspark.sql.functions import broadcast, col, lower, regexp_replace
+import sys
+import requests
+from bs4 import BeautifulSoup
+from pyspark.sql import SparkSession, DataFrame
+from pyspark.sql.functions import broadcast, col, lower, udf, regexp_replace
+from pyspark.sql.types import BooleanType
+from pyspark.sql.utils import AnalysisException
 
 def create_spark_session(app_name: str = "URLViolationDetector", master: str | None = None) -> SparkSession:
     """Creates and returns a Spark session.
@@ -68,6 +73,7 @@ def main():
     parser.add_argument("--keywords", dest="keywords_txt_path", default=os.path.join(project_root, 'data', 'keywords_violation.txt'), help="Path to violation keywords .txt")
     parser.add_argument("--output", dest="output_dir", default=os.path.join(script_dir, 'violated_urls.csv'), help="Output directory to write CSV result")
     parser.add_argument("--master", dest="master", default=None, help="Spark master, e.g. local[*] or spark://host:7077")
+    parser.add_argument("--scan-mode", dest="scan_mode", default="url", choices=["url", "content"], help="Scan mode: 'url' (fast) or 'content' (slow)")
     args = parser.parse_args()
 
     urls_csv_path = args.urls_csv_path
@@ -113,13 +119,60 @@ def main():
         lower(regexp_replace(col("url"), "-", " "))
     )
 
-    # Use a broadcast join with a filter condition to find matches.
-    violated_urls_df = urls_to_check_df.join(
-        broadcast(keywords_df),
-        urls_to_check_df.processed_url.contains(keywords_df.keyword)
-    )
+    # Logic for finding violations depends on the scan mode
+    if args.scan_mode == 'url':
+        print("[Spark] Running in URL scan mode (fast).")
+        # Prepare the URL data by replacing hyphens with spaces and converting to lowercase
+        urls_to_check_df = urls_df.withColumn(
+            "processed_url",
+            lower(regexp_replace(col("url"), "-", " "))
+        )
+        # Use a broadcast join with a filter condition to find matches.
+        violated_urls_df = urls_to_check_df.join(
+            broadcast(keywords_df),
+            urls_to_check_df.processed_url.contains(keywords_df.keyword)
+        )
+    else:
+        print("[Spark] Running in content scan mode (slow).")
+        # Collect keywords into a list to be broadcasted to the UDF
+        keyword_list = [row.keyword for row in keywords_df.collect()]
+        broadcast_keywords = spark.sparkContext.broadcast(keyword_list)
 
-    # Select columns conditionally based on the presence of a 'date' column
+        def fetch_and_scan_content(url: str) -> bool:
+            """
+            UDF to fetch web content from a URL, parse it, and check for keywords.
+            Returns True if a keyword is found, False otherwise.
+            """
+            try:
+                # Set a timeout to avoid getting stuck on slow pages
+                response = requests.get(url, timeout=10)
+                response.raise_for_status() # Raise an exception for bad status codes
+
+                # Use BeautifulSoup to parse HTML and extract text
+                soup = BeautifulSoup(response.content, 'html.parser')
+
+                # Get all text and convert to lowercase
+                page_text = soup.get_text().lower()
+
+                # Check if any of the broadcasted keywords are in the page text
+                return any(keyword in page_text for keyword in broadcast_keywords.value)
+            except requests.RequestException as e:
+                # Handle network errors (timeout, DNS, etc.)
+                print(f"Warning: Could not fetch URL {url}: {e}")
+                return False
+            except Exception as e:
+                # Handle other unexpected errors
+                print(f"Warning: An unexpected error occurred for URL {url}: {e}")
+                return False
+
+        # Register the function as a Spark UDF
+        scan_content_udf = udf(fetch_and_scan_content, BooleanType())
+
+        # Apply the UDF to the 'url' column to find violations
+        violated_urls_df = urls_df.withColumn("has_violation", scan_content_udf(col("url")))\
+                                  .filter(col("has_violation") == True)
+
+    # Select final columns based on the presence of a 'date' column
     if "date" in urls_df.columns:
         violated_urls_df = violated_urls_df.select(urls_df["url"], urls_df["date"]).distinct()
     else:

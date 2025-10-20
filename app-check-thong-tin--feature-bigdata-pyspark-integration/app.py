@@ -40,6 +40,8 @@ class SparkJobManager(threading.Thread):
             args += ["--output", self.config["output"]]
         if self.config.get("master"):
             args += ["--master", self.config["master"]]
+        if self.config.get("scan_mode"):
+            args += ["--scan-mode", self.config["scan_mode"]]
 
         try:
             self.ui_queue.put(("status", "Bắt đầu chạy Spark job..."))
@@ -71,7 +73,7 @@ class SparkConfigDialog(tk.Toplevel):
     def __init__(self, parent):
         super().__init__(parent)
         self.title("Cấu hình Spark Job")
-        self.geometry("600x250")
+        self.geometry("600x350")
         self.transient(parent)
         self.grab_set()
 
@@ -80,24 +82,40 @@ class SparkConfigDialog(tk.Toplevel):
         main_frame = ttk.Frame(self, padding=15)
         main_frame.pack(fill=BOTH, expand=YES)
 
+        # Input files frame
+        files_frame = ttk.Labelframe(main_frame, text="Đầu vào & Đầu ra", padding=10)
+        files_frame.pack(fill=X, pady=(0, 10))
+
         # URLs
         self.urls_var = tk.StringVar()
-        self._create_row(main_frame, "CSV URLs (có cột 'url'):", self.urls_var, self._pick_csv_file)
+        self._create_row(files_frame, "CSV URLs (có cột 'url'):", self.urls_var, self._pick_csv_file)
 
         # Keywords
         self.keywords_var = tk.StringVar()
-        self._create_row(main_frame, "Từ khóa vi phạm (.txt):", self.keywords_var, self._pick_txt_file)
+        self._create_row(files_frame, "Từ khóa vi phạm (.txt):", self.keywords_var, self._pick_txt_file)
 
         # Output
         self.output_var = tk.StringVar()
-        self._create_row(main_frame, "Thư mục xuất kết quả:", self.output_var, self._pick_directory)
+        self._create_row(files_frame, "Thư mục xuất kết quả:", self.output_var, self._pick_directory)
+
+        # Scan mode frame
+        mode_frame = ttk.Labelframe(main_frame, text="Chế độ quét", padding=10)
+        mode_frame.pack(fill=X, pady=(0, 10))
+
+        self.scan_mode_var = tk.StringVar(value="url") # Default to 'url'
+        ttk.Radiobutton(mode_frame, text="Quét Tên Link (Nhanh)", variable=self.scan_mode_var, value="url").pack(anchor=W, pady=2)
+        ttk.Radiobutton(mode_frame, text="Quét Nội Dung Link (Chậm)", variable=self.scan_mode_var, value="content").pack(anchor=W, pady=2)
+
+        # Advanced options frame
+        adv_frame = ttk.Labelframe(main_frame, text="Tùy chọn nâng cao", padding=10)
+        adv_frame.pack(fill=X)
 
         # Master
         self.master_var = tk.StringVar()
-        self._create_row(main_frame, "Spark master (tùy chọn):", self.master_var, None)
+        self._create_row(adv_frame, "Spark master (tùy chọn):", self.master_var, None)
 
         # Buttons
-        btn_frame = ttk.Frame(main_frame, padding=(0, 10))
+        btn_frame = ttk.Frame(main_frame, padding=(10, 0))
         btn_frame.pack(fill=X)
         ttk.Button(btn_frame, text="Chạy", command=self._on_submit, bootstyle="success").pack(side=RIGHT, padx=5)
         ttk.Button(btn_frame, text="Hủy", command=self.destroy, bootstyle="secondary").pack(side=RIGHT)
@@ -136,7 +154,8 @@ class SparkConfigDialog(tk.Toplevel):
             "urls": urls,
             "keywords": keywords,
             "output": output,
-            "master": self.master_var.get().strip()
+            "master": self.master_var.get().strip(),
+            "scan_mode": self.scan_mode_var.get()
         }
         self.destroy()
 
