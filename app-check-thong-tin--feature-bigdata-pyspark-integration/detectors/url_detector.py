@@ -87,16 +87,35 @@ def _verdict_from_score(score: int, has_block: bool, text_hits: int, is_whitelis
     return verdict, truth_confidence, rationale
 
 
-def analyze_url(url: str) -> Dict[str, object]:
+def analyze_url(url: str, mode: str = 'content') -> Dict[str, object]:
+    """
+    Analyzes a URL for potential risks.
+    :param url: The URL to analyze.
+    :param mode: 'content' to fetch and scan page text (slow), or 'url' to only scan the URL string (fast).
+    """
     domain = _domain_from_url(url).lower()
     in_block = domain in BLOCKLIST or any(domain.endswith('.' + d) for d in BLOCKLIST)
     in_white = domain in WHITELIST or any(domain.endswith('.' + d) for d in WHITELIST)
-
     resolved_ip = _resolve_ip(domain) if domain else ''
 
-    page_text, meta = _fetch_text(url)
-
     indicators: List[str] = []
+    page_text = ""
+    meta = {}
+    unreachable = False
+
+    if mode == 'content':
+        page_text, meta = _fetch_text(url)
+        if not resolved_ip: # Double check reachability after fetch attempt
+            unreachable = True
+        if 'error' in meta:
+            err = meta.get('error', '').lower()
+            if any(key in err for key in ['name or service not known', 'nodename nor servname', 'failed to establish a new connection', 'name_resolved', 'dns', 'not found', '404']):
+                unreachable = True
+                indicators.append(f"Lỗi truy cập: {meta.get('error')}")
+    else: # URL scan mode
+        if not resolved_ip:
+            unreachable = True
+
     if in_block:
         indicators.append(f"Tên miền nằm trong danh sách cảnh báo: {domain}")
     if in_white:
@@ -107,33 +126,30 @@ def analyze_url(url: str) -> Dict[str, object]:
     else:
         indicators.append("Không phân giải được DNS cho tên miền")
 
-    # Handle unreachable/non-existent links
-    unreachable = False
-    if not resolved_ip:
-        unreachable = True
-    if 'error' in meta:
-        err = meta.get('error', '').lower()
-        if any(key in err for key in ['name or service not known', 'nodename nor servname', 'failed to establish a new connection', 'name_resolved', 'dns', 'not found', '404']):
-            unreachable = True
-            indicators.append(f"Lỗi truy cập: {meta.get('error')}")
-
     text_hits: List[str] = []
+    # Scan page text if available (in content mode)
     if page_text:
         for pat in VIOLATION_PATTERNS:
             if pat.search(page_text):
                 text_hits.append(pat.pattern)
 
+    # Always scan the URL itself for patterns, avoiding duplicates
+    for pat in VIOLATION_PATTERNS:
+        if pat.search(url):
+            if pat.pattern not in text_hits:
+                 text_hits.append(f"{pat.pattern} (in URL)")
+
     risk_score = 0
     if in_block:
         risk_score += 60
     if text_hits:
-        risk_score += 30
-    if not page_text:
-        risk_score += 10
+        risk_score += 40  # Increased weight for any text match
+    if mode == 'content' and not page_text and not unreachable:
+        risk_score += 10  # Penalize empty content only in content mode
     if in_white:
-        risk_score = max(0, risk_score - 25)
+        risk_score = max(0, risk_score - 30)
     if unreachable:
-        risk_score += 25  # unreachable link => cannot verify → at least medium risk
+        risk_score += 30  # Unreachable link => cannot verify → at least medium risk
 
     # Special verdict for unreachable
     if unreachable:
