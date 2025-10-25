@@ -405,6 +405,10 @@ class App(ttk.Window):
 
         risk_tag = f"risk_{risk}"
 
+        # Insert the analyzed URL with color coding based on risk
+        analyzed_url = payload.get("url", "N/A")
+        widget.insert(tk.END, f"{analyzed_url}\n\n", risk_tag)
+
         widget.insert(tk.END, "TỔNG QUAN PHÂN TÍCH\n", "header")
         widget.insert(tk.END, "Kết luận: ", "bold")
         widget.insert(tk.END, f"{verdict}\n", risk_tag)
