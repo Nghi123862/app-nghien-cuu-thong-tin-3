@@ -2,7 +2,7 @@ services:
   app:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: app-check-thong-tin--feature-bigdata-pyspark-integration/Dockerfile
     container_name: app-check-thong-tin
     environment:
       - TZ=Etc/UTC
@@ -13,4 +13,6 @@ services:
     volumes:
       - ./data:/app/data
       - ./bigdata:/app/bigdata
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped

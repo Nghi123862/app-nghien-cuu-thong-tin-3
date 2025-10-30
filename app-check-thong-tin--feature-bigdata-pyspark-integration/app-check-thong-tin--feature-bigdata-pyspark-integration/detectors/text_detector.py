@@ -2,12 +2,46 @@ import os
 import re
 from typing import Dict, List
 
-# Import shared resources from the patterns module
-try:
-    from .patterns import VIOLATION_PATTERNS, PHRASES_WHITE, PHRASES_BLACK
-except ImportError:
-    # Fallback for direct execution
-    from patterns import VIOLATION_PATTERNS, PHRASES_WHITE, PHRASES_BLACK
+DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data')
+
+
+def _load_lines(name: str) -> List[str]:
+    path = os.path.join(DATA_DIR, name)
+    if not os.path.exists(path):
+        return []
+    items: List[str] = []
+    with open(path, 'r', encoding='utf-8', errors='ignore') as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith('#'):
+                continue
+            items.append(line.lower())
+    return items
+
+
+def _load_keywords() -> List[str]:
+    return _load_lines('keywords_violation.txt')
+
+PHRASES_WHITE = _load_lines('phrases_whitelist.txt')
+PHRASES_BLACK = _load_lines('phrases_blacklist.txt')
+
+KEYWORDS = _load_keywords()
+
+
+def _count_keyword_hits(text: str) -> int:
+    t = text.lower()
+    total = 0
+    for kw in KEYWORDS:
+        if kw and kw in t:
+            total += 1
+    return total
+
+
+# Base suspicious patterns
+SUSPICIOUS_PATTERNS = [
+    re.compile(r"\b(100%|siêu|bạo|cam kết|miễn phí)\b", re.IGNORECASE),
+    re.compile(r"\b(bịa đặt|xuyên tạc|kích động|thù hằn|lừa đảo)\b", re.IGNORECASE),
+]
 
 # Doomsday hoax specific cues
 DOOMSDAY_PATTERNS = [
@@ -52,16 +86,12 @@ def analyze_text(text: str) -> Dict[str, object]:
         return {"risk_level": "Không có dữ liệu", "risk_score": 0, "hits": 0, "patterns": [], "verdict": "Không đủ dữ liệu", "confidence": 0, "rationale": ""}
 
     t = text.lower()
+    hits = _count_keyword_hits(text)
 
-    # Use the shared, more comprehensive VIOLATION_PATTERNS
-    violation_hits = []
-    for pat in VIOLATION_PATTERNS:
-        matches = pat.findall(t)
-        if matches:
-            violation_hits.extend(matches)
-
-    hits = len(violation_hits)
-    pattern_hits: List[str] = list(set(violation_hits)) # Unique patterns found
+    pattern_hits: List[str] = []
+    for pat in SUSPICIOUS_PATTERNS:
+        if pat.search(text):
+            pattern_hits.append(pat.pattern)
 
     doom_hits = 0
     for pat in DOOMSDAY_PATTERNS:
@@ -84,10 +114,12 @@ def analyze_text(text: str) -> Dict[str, object]:
     white_hits = sum(1 for p in PHRASES_WHITE if p in t)
     black_hits = sum(1 for p in PHRASES_BLACK if p in t)
 
-    # Reworked score: standard violation hits have a much higher weight now.
-    risk_score = (hits * 25) + (doom_hits * 25) + (scam_hits * 45) + (black_hits * 20) + (astro_hits * 30)
-    risk_score = max(0, risk_score - white_hits * 30)
+    # Score with stronger astro/black influence
+    risk_score = hits * 10 + (len(pattern_hits) * 8) + (doom_hits * 25) + (scam_hits * 45) + (black_hits * 18) + (astro_hits * 30)
+    risk_score = max(0, risk_score - white_hits * 22)
 
+    if len(text) < 30 and hits >= 1:
+        risk_score += 5
     if doom_hits >= 2 or black_hits >= 2 or astro_hits >= 1:
         risk_score += 25
 
