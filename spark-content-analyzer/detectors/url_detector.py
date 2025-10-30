@@ -87,7 +87,7 @@ def _verdict_from_score(score: int, has_block: bool, text_hits: int, is_whitelis
     return verdict, truth_confidence, rationale
 
 
-def analyze_url(url: str) -> Dict[str, object]:
+def analyze_url(url: str, user_keywords: list = []) -> Dict[str, object]:
     domain = _domain_from_url(url).lower()
     in_block = domain in BLOCKLIST or any(domain.endswith('.' + d) for d in BLOCKLIST)
     in_white = domain in WHITELIST or any(domain.endswith('.' + d) for d in WHITELIST)
@@ -119,7 +119,8 @@ def analyze_url(url: str) -> Dict[str, object]:
 
     text_hits: List[str] = []
     if page_text:
-        for pat in VIOLATION_PATTERNS:
+        all_patterns = VIOLATION_PATTERNS + [re.compile(r'\b' + re.escape(kw) + r'\b', re.IGNORECASE) for kw in user_keywords]
+        for pat in all_patterns:
             if pat.search(page_text):
                 text_hits.append(pat.pattern)
 

@@ -60,6 +60,20 @@ class App(ttk.Window):
         entry = ttk.Entry(parent, textvariable=self.url_var, font="-size 11")
         entry.pack(fill=X, pady=(0, 10), ipady=4)
 
+        # --- Analysis Method Selection for URL ---
+        method_frame = ttk.Frame(parent)
+        method_frame.pack(anchor=W, fill=X, pady=5)
+        ttk.Label(method_frame, text="Phương pháp phân tích:", font="-size 10 -weight bold").pack(anchor=W)
+
+        self.url_analysis_method = tk.StringVar(value="url_only")
+
+        url_only_radio = ttk.Radiobutton(method_frame, text="Chỉ phân tích URL (Rất nhanh)", variable=self.url_analysis_method, value="url_only")
+        url_only_radio.pack(anchor=W, side=LEFT, padx=10)
+
+        ollama_radio = ttk.Radiobutton(method_frame, text="Phân tích nội dung trang với Ollama AI (Rất chậm)", variable=self.url_analysis_method, value="ollama_content")
+        ollama_radio.pack(anchor=W, side=LEFT)
+        # --- End of Selection ---
+
         ttk.Button(parent, text="Phân tích URL", command=self._on_check_url, bootstyle="success").pack(anchor=W, pady=5, ipady=4)
         self.url_result = ttk.Text(parent, height=16, font="-size 10", wrap="word", relief=FLAT)
         self.url_result.pack(fill=BOTH, expand=YES, pady=(5,0))
@@ -130,6 +144,20 @@ class App(ttk.Window):
         self.bd_master_var = tk.StringVar()
         ttk.Entry(row4, textvariable=self.bd_master_var).pack(side=LEFT, fill=X, expand=YES, padx=8)
 
+        # --- Analysis Method Selection for Big Data ---
+        method_frame = ttk.Frame(parent)
+        method_frame.pack(anchor=W, fill=X, pady=10)
+        ttk.Label(method_frame, text="Phương pháp phân tích:", font="-size 10 -weight bold").pack(anchor=W)
+
+        self.bd_analysis_method = tk.StringVar(value="url_only")
+
+        url_only_radio = ttk.Radiobutton(method_frame, text="Chỉ phân tích URL (Nhanh)", variable=self.bd_analysis_method, value="url_only")
+        url_only_radio.pack(anchor=W, side=LEFT, padx=10)
+
+        ollama_radio = ttk.Radiobutton(method_frame, text="Phân tích nội dung với Ollama AI (Rất chậm)", variable=self.bd_analysis_method, value="ollama_content")
+        ollama_radio.pack(anchor=W, side=LEFT)
+        # --- End of Selection ---
+
         ttk.Button(parent, text="Chạy xử lý với Spark", bootstyle="success", command=self._on_run_bigdata).pack(anchor=W, pady=6)
 
         self.bd_log = ttk.Text(parent, height=18, font="-size 10", wrap="word", relief=FLAT)
@@ -164,8 +192,10 @@ class App(ttk.Window):
         keywords = self.bd_keywords_var.get().strip()
         output = self.bd_output_var.get().strip()
         master = self.bd_master_var.get().strip()
+        method = self.bd_analysis_method.get()
 
         args = [sys.executable, script_path]
+        args += ["--method", method]
         if urls:
             args += ["--urls", urls]
         if keywords:
@@ -197,17 +227,56 @@ class App(ttk.Window):
             messagebox.showerror("Spark", f"Không thể chạy Spark: {e}")
 
     def _on_check_url(self) -> None:
+        import os
+        import requests
+        from bs4 import BeautifulSoup
+
         url = self.url_var.get().strip()
+        method = self.url_analysis_method.get()
+
         if not url:
             messagebox.showwarning("Thiếu dữ liệu", "Vui lòng nhập URL")
             return
+
         try:
-            result = analyze_url(url)
-            self._display_summary_plus_json(self.url_result, result)
+            self.config(cursor="watch")
+            self.update_idletasks()
+
+            result = None
+            user_keywords = []
+
+            keywords_path = os.path.join('data', 'user_added_keywords.txt')
+            if os.path.exists(keywords_path):
+                with open(keywords_path, 'r', encoding='utf-8') as f:
+                    user_keywords = [line.strip() for line in f if line.strip()]
+
+            if method == "url_only":
+                result = analyze_url(url, user_keywords=user_keywords)
+            elif method == "ollama_content":
+                headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36'}
+                response = requests.get(url, timeout=15, headers=headers)
+                response.raise_for_status()
+
+                soup = BeautifulSoup(response.content, 'html.parser')
+                text_content = ' '.join(t.strip() for t in soup.stripped_strings)
+
+                if not text_content:
+                    raise ValueError("Không thể trích xuất nội dung văn bản từ URL này.")
+
+                result = analyze_text_with_ollama(text_content, user_keywords=user_keywords)
+
+            if result:
+                self._display_summary_plus_json(self.url_result, result)
+            else:
+                raise ValueError("Phương pháp phân tích không hợp lệ được chọn.")
+
         except Exception as e:
             self._display_error(self.url_result, e)
+        finally:
+            self.config(cursor="")
 
     def _on_check_text(self) -> None:
+        import os
         text = self.text_input.get("1.0", tk.END).strip()
         method = self.text_analysis_method.get()
 
@@ -217,13 +286,21 @@ class App(ttk.Window):
 
         try:
             result = None
+            user_keywords = []
+
+            # Load user-added keywords to pass to the analysis functions
+            keywords_path = os.path.join('data', 'user_added_keywords.txt')
+            if os.path.exists(keywords_path):
+                with open(keywords_path, 'r', encoding='utf-8') as f:
+                    user_keywords = [line.strip() for line in f if line.strip()]
+
             if method == "keyword":
                 # The user selected the original keyword-based analysis
-                result = analyze_text(text)
+                result = analyze_text(text, user_keywords=user_keywords)
             elif method == "ollama":
-                # The user selected the new Ollama-based analysis
+                # The user selected the new Ollama-based analysis, now with user keywords
                 # NOTE: This will block the UI. A future improvement would be to run this in a thread.
-                result = analyze_text_with_ollama(text)
+                result = analyze_text_with_ollama(text, user_keywords=user_keywords)
 
             if result:
                 self._display_summary_plus_json(self.text_result, result)
