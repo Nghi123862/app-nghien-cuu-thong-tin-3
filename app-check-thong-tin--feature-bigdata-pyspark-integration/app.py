@@ -11,11 +11,53 @@ import queue
 
 try:
     from detectors import analyze_url, analyze_text, analyze_file
+    from detectors.ai_detector import analyze_text_with_ai
 except Exception:
     # Lazy import fallback paths
     from detectors.url_detector import analyze_url  # type: ignore
     from detectors.text_detector import analyze_text  # type: ignore
     from detectors.file_detector import analyze_file  # type: ignore
+    from detectors.ai_detector import analyze_text_with_ai # type: ignore
+    from detectors.patterns import load_user_keywords # Import the new function
+
+
+class FeedbackDialog(tk.Toplevel):
+    """A dialog for submitting feedback and new keywords."""
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.title("Báo cáo kết quả sai")
+        self.geometry("500x300")
+        self.transient(parent)
+        self.grab_set()
+
+        self.new_keywords = ""
+
+        main_frame = ttk.Frame(self, padding=15)
+        main_frame.pack(fill=BOTH, expand=YES)
+
+        ttk.Label(main_frame, text="Nếu bạn cho rằng kết quả này là sai, vui lòng nhập các từ khóa\n"
+                                   "mà bạn tin là vi phạm (mỗi từ khóa trên một dòng).",
+                  justify=LEFT).pack(anchor=W, pady=(0, 10))
+
+        self.text_input = ttk.Text(main_frame, height=8, font="-size 10", wrap="word")
+        self.text_input.pack(fill=BOTH, expand=YES, pady=(0, 10))
+
+        btn_frame = ttk.Frame(main_frame)
+        btn_frame.pack(fill=X)
+        ttk.Button(btn_frame, text="Gửi", command=self._on_submit, bootstyle="success").pack(side=RIGHT, padx=5)
+        ttk.Button(btn_frame, text="Hủy", command=self.destroy, bootstyle="secondary").pack(side=RIGHT)
+
+    def _on_submit(self):
+        self.new_keywords = self.text_input.get("1.0", tk.END).strip()
+        if not self.new_keywords:
+            messagebox.showwarning("Thiếu thông tin", "Vui lòng nhập ít nhất một từ khóa.", parent=self)
+            return
+        self.destroy()
+
+    def wait_for_keywords(self) -> str:
+        self.wait_window()
+        return self.new_keywords
+
 
 class SparkJobManager(threading.Thread):
     """
@@ -206,6 +248,24 @@ class App(ttk.Window):
         notebook.add(big_tab, text="  Big Data (Spark)  ")
         self._build_bigdata_tab(big_tab)
 
+    def _on_report_feedback(self):
+        """Handles the feedback reporting process."""
+        dialog = FeedbackDialog(self)
+        new_keywords = dialog.wait_for_keywords()
+
+        if new_keywords:
+            try:
+                # Path to the user-added keywords file
+                keywords_path = os.path.join(os.path.dirname(__file__), 'data', 'user_added_keywords.txt')
+
+                # Append new keywords to the file
+                with open(keywords_path, 'a', encoding='utf-8') as f:
+                    f.write('\n' + new_keywords + '\n')
+
+                messagebox.showinfo("Cảm ơn bạn!", "Cảm ơn bạn đã đóng góp! Các từ khóa mới sẽ được sử dụng trong những lần phân tích sau.", parent=self)
+            except Exception as e:
+                messagebox.showerror("Lỗi", f"Không thể lưu từ khóa mới: {e}", parent=self)
+
     def _build_url_tab(self, parent: ttk.Frame) -> None:
         ttk.Label(parent, text="Nhập đường dẫn (URL) để phân tích:", font="-size 12").pack(anchor=W, pady=(0, 5))
         self.url_var = tk.StringVar()
@@ -220,7 +280,11 @@ class App(ttk.Window):
         ttk.Radiobutton(url_mode_frame, text="Quét Tên Link (Nhanh)", variable=self.url_scan_mode_var, value="url").pack(anchor=W)
         ttk.Radiobutton(url_mode_frame, text="Quét Nội Dung Link (Chậm)", variable=self.url_scan_mode_var, value="content").pack(anchor=W)
 
-        ttk.Button(parent, text="Phân tích URL", command=self._on_check_url, bootstyle="success").pack(anchor=W, pady=5, ipady=4)
+        action_frame = ttk.Frame(parent)
+        action_frame.pack(fill=X, pady=5)
+        ttk.Button(action_frame, text="Phân tích URL", command=self._on_check_url, bootstyle="success").pack(side=LEFT, ipady=4)
+        ttk.Button(action_frame, text="Báo cáo kết quả sai", command=self._on_report_feedback, bootstyle="warning-outline").pack(side=LEFT, padx=10, ipady=4)
+
         self.url_result = ttk.Text(parent, height=14, font="-size 10", wrap="word", relief=FLAT)
         self.url_result.pack(fill=BOTH, expand=YES, pady=(5,0))
         self.url_result.configure(state='disabled') # Make it read-only initially
@@ -230,7 +294,19 @@ class App(ttk.Window):
         self.text_input = ttk.Text(parent, height=12, font="-size 10", wrap="word", relief=FLAT)
         self.text_input.pack(fill=BOTH, expand=YES, pady=(0, 10))
 
-        ttk.Button(parent, text="Phân tích văn bản", command=self._on_check_text, bootstyle="success").pack(anchor=W, pady=5, ipady=4)
+        # Scan mode frame for Text tab
+        text_mode_frame = ttk.Labelframe(parent, text="Phương pháp phân tích", padding=(10, 5))
+        text_mode_frame.pack(fill=X, pady=(0, 10))
+
+        self.text_scan_mode_var = tk.StringVar(value="keyword") # Default to 'keyword'
+        ttk.Radiobutton(text_mode_frame, text="Dựa trên Từ khóa (Nhanh)", variable=self.text_scan_mode_var, value="keyword").pack(anchor=W)
+        ttk.Radiobutton(text_mode_frame, text="Sử dụng AI (Rất chậm)", variable=self.text_scan_mode_var, value="ai").pack(anchor=W)
+
+        action_frame = ttk.Frame(parent)
+        action_frame.pack(fill=X, pady=5)
+        ttk.Button(action_frame, text="Phân tích văn bản", command=self._on_check_text, bootstyle="success").pack(side=LEFT, ipady=4)
+        ttk.Button(action_frame, text="Báo cáo kết quả sai", command=self._on_report_feedback, bootstyle="warning-outline").pack(side=LEFT, padx=10, ipady=4)
+
         self.text_result = ttk.Text(parent, height=12, font="-size 10", wrap="word", relief=FLAT)
         self.text_result.pack(fill=BOTH, expand=YES, pady=(5,0))
         self.text_result.configure(state='disabled')
@@ -351,11 +427,28 @@ class App(ttk.Window):
         if not text:
             messagebox.showwarning("Thiếu dữ liệu", "Vui lòng nhập văn bản")
             return
+
+        scan_mode = self.text_scan_mode_var.get()
+
+        # Run analysis in a separate thread to avoid freezing the UI, especially for AI
+        thread = threading.Thread(target=self._run_text_analysis_thread, args=(text, scan_mode))
+        thread.daemon = True
+        thread.start()
+
+    def _run_text_analysis_thread(self, text: str, scan_mode: str) -> None:
+        """Helper to run text analysis in a thread and schedule UI update."""
         try:
-            result = analyze_text(text)
-            self._display_summary_plus_json(self.text_result, result)
+            if scan_mode == "ai":
+                # Load the latest user keywords and pass them to the AI
+                user_keywords = load_user_keywords()
+                result = analyze_text_with_ai(text, user_keywords=user_keywords)
+            else: # keyword
+                result = analyze_text(text)
+
+            # Schedule the UI update to run in the main thread
+            self.after(0, self._display_summary_plus_json, self.text_result, result)
         except Exception as e:
-            self._display_error(self.text_result, e)
+            self.after(0, self._display_error, self.text_result, e)
 
     def _on_pick_file(self) -> None:
         path = filedialog.askopenfilename(filetypes=[("Tất cả", "*.*"), ("Văn bản", "*.txt"), ("PDF", "*.pdf"), ("Word", "*.docx")])
@@ -378,7 +471,7 @@ class App(ttk.Window):
         widget.delete("1.0", tk.END)
         widget.insert(tk.END, f"Lỗi không xác định:\n{error}")
         widget.configure(state='disabled')
-        messagebox.showerror("Lỗi", f"Đã xảy ra lỗi trong quá trình phân tích:\n{error}")
+        messagebox.showerror("Lỗi", f"Đã có lỗi xảy ra trong quá trình phân tích:\n{error}")
 
     def _display_summary_plus_json(self, widget: ttk.Text, payload: Any) -> None:
         import json

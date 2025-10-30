@@ -6,32 +6,12 @@ from typing import Dict, List, Tuple
 import requests
 from bs4 import BeautifulSoup
 
-DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data')
-
-
-def _load_lines(path: str) -> List[str]:
-    if not os.path.exists(path):
-        return []
-    items: List[str] = []
-    with open(path, 'r', encoding='utf-8', errors='ignore') as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith('#'):
-                continue
-            items.append(line.lower())
-    return items
-
-
-def _load_blocklist() -> List[str]:
-    return _load_lines(os.path.join(DATA_DIR, 'domains_blocklist.txt'))
-
-
-def _load_whitelist() -> List[str]:
-    return _load_lines(os.path.join(DATA_DIR, 'domains_whitelist.txt'))
-
-
-BLOCKLIST = set(_load_blocklist())
-WHITELIST = set(_load_whitelist())
+# Import shared resources from the patterns module
+try:
+    from .patterns import VIOLATION_PATTERNS, DOMAINS_BLOCKLIST, DOMAINS_WHITELIST
+except ImportError:
+    # Fallback for direct execution
+    from patterns import VIOLATION_PATTERNS, DOMAINS_BLOCKLIST, DOMAINS_WHITELIST
 
 
 def _domain_from_url(url: str) -> str:
@@ -64,10 +44,12 @@ def _fetch_text(url: str, timeout: int = 8) -> Tuple[str, Dict[str, str]]:
         return '', {"error": str(e)}
 
 
-VIOLATION_PATTERNS = [
-    re.compile(r"\b(lừa đảo|đồi trụy|kích động|bạo lực|thù hằn|khủng bố)\b", re.IGNORECASE),
-    re.compile(r"\b(fake news|scam|porn|hate speech|terror)\b", re.IGNORECASE),
-]
+# Import shared patterns to ensure consistency
+try:
+    from .patterns import VIOLATION_PATTERNS
+except ImportError:
+    # Fallback for direct execution
+    from patterns import VIOLATION_PATTERNS
 
 
 def _verdict_from_score(score: int, has_block: bool, text_hits: int, is_whitelist: bool) -> Tuple[str, int, str]:
