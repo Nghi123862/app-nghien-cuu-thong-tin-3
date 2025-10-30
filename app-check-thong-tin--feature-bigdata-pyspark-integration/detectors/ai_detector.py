@@ -78,7 +78,7 @@ def analyze_text_with_ai(text: str, user_keywords: List[str] = []) -> Dict[str, 
             "confidence": round(confidence),
             "rationale": rationale,
             "ai_model": MODEL_NAME,
-            "ai_label": top_result, # Use the correct variable
+            "ai_label": top_result,
         }
     except Exception as e:
         print(f"AI Detector: An error occurred during analysis: {e}")

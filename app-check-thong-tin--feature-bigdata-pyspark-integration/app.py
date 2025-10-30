@@ -12,6 +12,7 @@ import queue
 try:
     from detectors import analyze_url, analyze_text, analyze_file
     from detectors.ai_detector import analyze_text_with_ai
+    from detectors.patterns import load_user_keywords # Import the new function
 except Exception:
     # Lazy import fallback paths
     from detectors.url_detector import analyze_url  # type: ignore
