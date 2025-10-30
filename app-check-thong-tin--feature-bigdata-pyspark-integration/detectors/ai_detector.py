@@ -10,15 +10,21 @@ from typing import Dict, Any, List
 MODEL_NAME = "Moritz/bert-base-uncased-qqp-finetuned-squad-for-zero-shot"
 CACHE_DIR = "huggingface_cache" # Ensures models are saved within the project dir
 
+# --- Model Loading with Improved Error Handling ---
+classifier = None
+model_loading_error = None
+
 print(f"AI Detector: Loading Zero-Shot pipeline with model '{MODEL_NAME}'...")
 try:
-    # The pipeline handles tokenization and model loading for us.
-    # On first run, this will download and cache the model, which may take time.
+    # The pipeline handles tokenization and model loading.
+    # With the Docker build changes, this should primarily load from the local cache.
     classifier = pipeline("zero-shot-classification", model=MODEL_NAME, cache_dir=CACHE_DIR)
     print("AI Detector: Pipeline loaded successfully.")
 except Exception as e:
-    print(f"AI Detector: CRITICAL - Failed to load pipeline. AI features will not work. Error: {e}")
-    classifier = None
+    # If loading fails (e.g., cache is corrupt, network issue), store the error.
+    model_loading_error = f"Không thể tải mô hình AI '{MODEL_NAME}'. Lý do: {e}"
+    print(f"AI Detector: CRITICAL - {model_loading_error}")
+
 
 # --- Analysis Function ---
 
@@ -28,11 +34,12 @@ def analyze_text_with_ai(text: str, user_keywords: List[str] = []) -> Dict[str, 
     It classifies the text against a set of candidate labels, including user-provided keywords.
     """
     if not classifier:
+        # If the model failed to load, return a detailed error message.
         return {
             "risk_level": "Không xác định",
             "verdict": "Lỗi: Mô hình AI chưa được tải",
             "confidence": 0,
-            "rationale": "Không thể phân tích do lỗi tải mô hình AI. Vui lòng kiểm tra log.",
+            "rationale": model_loading_error or "Mô hình AI không khả dụng. Vui lòng kiểm tra log khởi động.",
         }
 
     try:

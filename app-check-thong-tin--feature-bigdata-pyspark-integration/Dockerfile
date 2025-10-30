@@ -20,8 +20,13 @@ RUN wget https://archive.apache.org/dist/spark/spark-4.0.1/spark-4.0.1-bin-hadoo
 # Create and populate Python virtual environment
 RUN python3 -m venv /opt/venv
 ENV PATH="/opt/venv/bin:${PATH}"
-COPY requirements.txt requirements.txt
+
+# Pre-load dependencies and AI model
+WORKDIR /build
+COPY requirements.txt .
 RUN pip install --upgrade pip && pip install -r requirements.txt
+COPY preload_model.py .
+RUN python preload_model.py
 
 
 # --- Final Stage ---
@@ -55,6 +60,7 @@ RUN useradd -m -s /bin/bash ${USER_NAME}
 # Copy artifacts from the builder stage
 COPY --from=builder /opt/venv /opt/venv
 COPY --from=builder /opt/spark /opt/spark
+COPY --from=builder /build/huggingface_cache /app/huggingface_cache
 
 # Set Environment Variables for Java, Spark, and Python
 ENV JAVA_HOME="/usr/lib/jvm/java-17-openjdk-amd64" \
