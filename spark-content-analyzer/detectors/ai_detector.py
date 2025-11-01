@@ -4,10 +4,24 @@ import json
 from typing import Dict, Any, List
 
 # --- Ollama Configuration ---
+import os
+
+def get_ollama_url():
+    """
+    Determines the correct Ollama URL based on the execution environment.
+    """
+    # Check for a common Docker environment indicator file.
+    if os.path.exists('/.dockerenv'):
+        # Running inside Docker, connect to the host machine.
+        print("AI Detector: Running inside Docker. Using host.docker.internal for Ollama.")
+        return "http://host.docker.internal:11434/api/generate"
+    else:
+        # Running on the host machine directly.
+        print("AI Detector: Running on host. Using localhost for Ollama.")
+        return "http://localhost:11434/api/generate"
+
 # The application will connect to this Ollama server endpoint.
-# This address assumes Ollama is running on the same machine as Docker.
-# 'host.docker.internal' is a special DNS name that resolves to the host machine's IP.
-OLLAMA_URL = "http://host.docker.internal:11434/api/generate"
+OLLAMA_URL = get_ollama_url()
 # The user specified 'gemma3 4b'. In Ollama, this is typically just 'gemma'.
 # The user can pull whichever Gemma version they prefer (e.g., 'ollama pull gemma:2b').
 OLLAMA_MODEL = "gemma"
