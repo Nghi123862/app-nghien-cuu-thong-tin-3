@@ -81,14 +81,12 @@ def _verdict_from_score(score: int, hits: int, patterns: int, doom: int, scam: i
     return "Thông tin có vẻ thật/an toàn", max(75, truth_confidence), "Không phát hiện dấu hiệu đáng kể" + bonus
 
 
-def analyze_text(text: str, user_keywords: list = []) -> Dict[str, object]:
+def analyze_text(text: str) -> Dict[str, object]:
     if not text:
         return {"risk_level": "Không có dữ liệu", "risk_score": 0, "hits": 0, "patterns": [], "verdict": "Không đủ dữ liệu", "confidence": 0, "rationale": ""}
 
     t = text.lower()
-    # Combine the pre-defined keywords with user-added keywords for hit counting
-    all_keywords = KEYWORDS + user_keywords
-    hits = sum(1 for kw in all_keywords if kw and kw in t)
+    hits = _count_keyword_hits(text)
 
     pattern_hits: List[str] = []
     for pat in SUSPICIOUS_PATTERNS:

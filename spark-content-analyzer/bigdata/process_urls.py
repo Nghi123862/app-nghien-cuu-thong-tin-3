@@ -1,11 +1,7 @@
 import os
 import argparse
-import requests
-import json
-from bs4 import BeautifulSoup
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import broadcast, col, lower, regexp_replace, udf
-from pyspark.sql.types import BooleanType, StringType
+from pyspark.sql.functions import broadcast, col, lower, regexp_replace
 
 def create_spark_session(app_name: str = "URLViolationDetector", master: str | None = None) -> SparkSession:
     """Creates and returns a Spark session.
@@ -60,46 +56,6 @@ def create_spark_session(app_name: str = "URLViolationDetector", master: str | N
     
     return builder.getOrCreate()
 
-
-OLLAMA_URL = "http://host.docker.internal:11434/api/generate"
-OLLAMA_MODEL = "gemma"
-
-def analyze_content(url: str, keywords: list) -> bool:
-    """
-    Fetches URL content, analyzes it with Ollama, and returns True if it's a violation.
-    This function is designed to be used as a Spark UDF.
-    """
-    try:
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36'}
-        response = requests.get(url, timeout=15, headers=headers)
-        response.raise_for_status()
-
-        soup = BeautifulSoup(response.content, 'html.parser')
-        text = ' '.join(t.strip() for t in soup.stripped_strings)
-
-        if not text:
-            return False
-
-        candidate_labels = ["an toàn", "tin giả", "kích động", "lừa đảo", "tiêu cực"] + keywords
-        prompt = f"""
-        Phân tích văn bản sau và phân loại nó vào một trong các nhãn sau: {', '.join(candidate_labels)}.
-        Văn bản: --- {text} ---
-        Chỉ trả về một JSON object với key "label". Ví dụ: {{"label": "tin giả"}}
-        """
-
-        payload = {"model": OLLAMA_MODEL, "prompt": prompt, "stream": False, "format": "json"}
-        ollama_response = requests.post(OLLAMA_URL, json=payload, timeout=60)
-        ollama_response.raise_for_status()
-
-        model_output = json.loads(ollama_response.json().get("response", "{}"))
-        label = model_output.get("label", "an toàn")
-
-        risky_labels = ["tin giả", "kích động", "lừa đảo", "tiêu cực"] + keywords
-        return label in risky_labels
-    except Exception:
-        # If any error occurs (network, parsing, etc.), treat it as non-violating.
-        return False
-
 def main():
     """
     Main function to process URLs, detect violations using a broadcast join, and save the results.
@@ -112,7 +68,6 @@ def main():
     parser.add_argument("--keywords", dest="keywords_txt_path", default=os.path.join(project_root, 'data', 'keywords_violation.txt'), help="Path to violation keywords .txt")
     parser.add_argument("--output", dest="output_dir", default=os.path.join(script_dir, 'violated_urls.csv'), help="Output directory to write CSV result")
     parser.add_argument("--master", dest="master", default=None, help="Spark master, e.g. local[*] or spark://host:7077")
-    parser.add_argument("--method", dest="method", default="url_only", choices=["url_only", "ollama_content"], help="The analysis method to use.")
     args = parser.parse_args()
 
     urls_csv_path = args.urls_csv_path
@@ -158,28 +113,11 @@ def main():
         lower(regexp_replace(col("url"), "-", " "))
     )
 
-    if args.method == 'url_only':
-        print("[Spark] Using URL-only analysis method.")
-        # Use a broadcast join with a filter condition to find matches.
-        violated_urls_df = urls_to_check_df.join(
-            broadcast(keywords_df),
-            urls_to_check_df.processed_url.contains(keywords_df.keyword)
-        ).select(urls_df["url"], urls_df["date"]).distinct()
-    elif args.method == 'ollama_content':
-        print("[Spark] Using Ollama content analysis method. This will be very slow.")
-        # Collect keywords to pass to the UDF
-        keyword_list = [row.keyword for row in keywords_df.collect()]
-
-        # Register the UDF
-        analyze_content_udf = udf(lambda url: analyze_content(url, keyword_list), BooleanType())
-
-        # Filter URLs based on the UDF result
-        violated_urls_df = urls_df.filter(analyze_content_udf(col("url")))\
-                                .select("url", "date")
-    else:
-        print(f"Error: Unknown method '{args.method}'")
-        spark.stop()
-        return
+    # Use a broadcast join with a filter condition to find matches.
+    violated_urls_df = urls_to_check_df.join(
+        broadcast(keywords_df),
+        urls_to_check_df.processed_url.contains(keywords_df.keyword)
+    ).select(urls_df["url"], urls_df["date"]).distinct()
 
     # Save the results
     try:
