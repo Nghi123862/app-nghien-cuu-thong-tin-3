@@ -115,7 +115,7 @@ def analyze_text(text: str) -> Dict[str, object]:
     black_hits = sum(1 for p in PHRASES_BLACK if p in t)
 
     # Score with stronger astro/black influence
-    risk_score = hits * 10 + (len(pattern_hits) * 8) + (doom_hits * 25) + (scam_hits * 45) + (black_hits * 18) + (astro_hits * 30)
+    risk_score = hits * 45 + (len(pattern_hits) * 8) + (doom_hits * 25) + (scam_hits * 45) + (black_hits * 18) + (astro_hits * 30)
     risk_score = max(0, risk_score - white_hits * 22)
 
     if len(text) < 30 and hits >= 1:
