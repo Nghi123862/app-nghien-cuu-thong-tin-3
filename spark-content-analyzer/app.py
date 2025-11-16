@@ -13,7 +13,6 @@ import json
 from detectors.url_detector import analyze_url
 from detectors.text_detector import analyze_text
 from detectors.file_detector import analyze_file
-from detectors.ai_detector import analyze_text_with_ai
 
 class App(ttk.Window):
     def __init__(self):
@@ -58,14 +57,6 @@ class App(ttk.Window):
         self.text_input = ttk.Text(parent, height=12, font="-size 10", wrap="word", relief=FLAT)
         self.text_input.pack(fill=BOTH, expand=YES, pady=(0, 10))
 
-        method_frame = ttk.Frame(parent)
-        method_frame.pack(anchor=W, fill=X, pady=5)
-        ttk.Label(method_frame, text="Phương pháp phân tích:", font="-size 10 -weight bold").pack(anchor=W)
-
-        self.text_analysis_method = tk.StringVar(value="keyword")
-        ttk.Radiobutton(method_frame, text="Dựa trên Từ khóa (Nhanh)", variable=self.text_analysis_method, value="keyword").pack(anchor=W, side=LEFT, padx=10)
-        ttk.Radiobutton(method_frame, text="Sử dụng AI (Chậm)", variable=self.text_analysis_method, value="ai").pack(anchor=W, side=LEFT)
-
         ttk.Button(parent, text="Phân tích văn bản", command=self._on_check_text, bootstyle="success").pack(anchor=W, pady=5, ipady=4)
         self.text_result = ttk.Text(parent, height=12, font="-size 10", wrap="word", relief=FLAT)
         self.text_result.pack(fill=BOTH, expand=YES, pady=(5,0))
@@ -105,16 +96,12 @@ class App(ttk.Window):
         text = self.text_input.get("1.0", tk.END).strip()
         if not text: return
 
-        method = self.text_analysis_method.get()
         user_keywords = self._load_user_keywords()
 
         try:
             self.config(cursor="watch")
             self.update_idletasks()
-            if method == "keyword":
-                result = analyze_text(text, user_keywords=user_keywords)
-            else: # AI
-                result = analyze_text_with_ai(text, user_keywords=user_keywords)
+            result = analyze_text(text, user_keywords=user_keywords)
             self._display_summary_plus_json(self.text_result, result)
         except Exception as e:
             self._display_error(self.text_result, e)
