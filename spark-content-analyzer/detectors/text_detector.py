@@ -1,31 +1,11 @@
-import os
 import re
 from typing import Dict, List
+from .utils import load_data_file
 
-DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data')
-
-
-def _load_lines(name: str) -> List[str]:
-    path = os.path.join(DATA_DIR, name)
-    if not os.path.exists(path):
-        return []
-    items: List[str] = []
-    with open(path, 'r', encoding='utf-8', errors='ignore') as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith('#'):
-                continue
-            items.append(line.lower())
-    return items
-
-
-def _load_keywords() -> List[str]:
-    return _load_lines('keywords_violation.txt')
-
-PHRASES_WHITE = _load_lines('phrases_whitelist.txt')
-PHRASES_BLACK = _load_lines('phrases_blacklist.txt')
-
-KEYWORDS = _load_keywords()
+# Load data using the reliable utility function
+PHRASES_WHITE = load_data_file('phrases_whitelist.txt')
+PHRASES_BLACK = load_data_file('phrases_blacklist.txt')
+KEYWORDS = load_data_file('keywords_violation.txt')
 
 
 def _count_keyword_hits(text: str) -> int:

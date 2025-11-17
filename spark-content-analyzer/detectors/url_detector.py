@@ -1,37 +1,14 @@
-import os
 import re
 import socket
 from urllib.parse import urlparse
 from typing import Dict, List, Tuple
 import requests
 from bs4 import BeautifulSoup
+from .utils import load_data_file
 
-DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data')
-
-
-def _load_lines(path: str) -> List[str]:
-    if not os.path.exists(path):
-        return []
-    items: List[str] = []
-    with open(path, 'r', encoding='utf-8', errors='ignore') as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith('#'):
-                continue
-            items.append(line.lower())
-    return items
-
-
-def _load_blocklist() -> List[str]:
-    return _load_lines(os.path.join(DATA_DIR, 'domains_blocklist.txt'))
-
-
-def _load_whitelist() -> List[str]:
-    return _load_lines(os.path.join(DATA_DIR, 'domains_whitelist.txt'))
-
-
-BLOCKLIST = set(_load_blocklist())
-WHITELIST = set(_load_whitelist())
+# Load data using the reliable utility function
+BLOCKLIST = set(load_data_file('domains_blocklist.txt'))
+WHITELIST = set(load_data_file('domains_whitelist.txt'))
 
 
 def _domain_from_url(url: str) -> str:
