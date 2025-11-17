@@ -15,12 +15,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN python3 -m venv /opt/venv
 ENV PATH="/opt/venv/bin:${PATH}"
 
-# Pre-load dependencies and AI model
+# Pre-load dependencies
 WORKDIR /build
 COPY requirements.txt .
 RUN pip install --upgrade pip && pip install -r requirements.txt
-COPY preload_model.py .
-RUN python preload_model.py
 
 
 # --- Final Stage ---
@@ -53,7 +51,6 @@ RUN useradd -m -s /bin/bash ${USER_NAME}
 
 # Copy artifacts from the builder stage
 COPY --from=builder /opt/venv /opt/venv
-COPY --from=builder /build/huggingface_cache ${APP_HOME}/huggingface_cache
 
 # Set Environment Variables for Java 17 and Python
 ENV JAVA_HOME="/usr/lib/jvm/java-17-openjdk-amd64" \

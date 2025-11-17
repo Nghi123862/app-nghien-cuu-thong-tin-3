@@ -13,7 +13,6 @@ import json
 from detectors.url_detector import analyze_url
 from detectors.text_detector import analyze_text
 from detectors.file_detector import analyze_file
-from detectors.ai_detector import analyze_text_with_ai
 
 class App(ttk.Window):
     def __init__(self):
@@ -58,14 +57,6 @@ class App(ttk.Window):
         self.text_input = ttk.Text(parent, height=12, font="-size 10", wrap="word", relief=FLAT)
         self.text_input.pack(fill=BOTH, expand=YES, pady=(0, 10))
 
-        method_frame = ttk.Frame(parent)
-        method_frame.pack(anchor=W, fill=X, pady=5)
-        ttk.Label(method_frame, text="Phương pháp phân tích:", font="-size 10 -weight bold").pack(anchor=W)
-
-        self.text_analysis_method = tk.StringVar(value="keyword")
-        ttk.Radiobutton(method_frame, text="Dựa trên Từ khóa (Nhanh)", variable=self.text_analysis_method, value="keyword").pack(anchor=W, side=LEFT, padx=10)
-        ttk.Radiobutton(method_frame, text="Sử dụng AI (Chậm)", variable=self.text_analysis_method, value="ai").pack(anchor=W, side=LEFT)
-
         ttk.Button(parent, text="Phân tích văn bản", command=self._on_check_text, bootstyle="success").pack(anchor=W, pady=5, ipady=4)
         self.text_result = ttk.Text(parent, height=12, font="-size 10", wrap="word", relief=FLAT)
         self.text_result.pack(fill=BOTH, expand=YES, pady=(5,0))
@@ -90,7 +81,27 @@ class App(ttk.Window):
         parent = ttk.Frame(notebook, padding=15)
         notebook.add(parent, text="  Big Data (Spark)  ")
 
-        # ... (Big Data UI remains the same as it doesn't use the integrated AI) ...
+        # --- File Selection ---
+        ttk.Label(parent, text="Chọn tệp URLs (.csv):", font="-size 10 -weight bold").pack(anchor=W, pady=(10, 2))
+        self.bigdata_urls_path = tk.StringVar()
+        self._create_file_picker(parent, self.bigdata_urls_path)
+
+        ttk.Label(parent, text="Chọn tệp từ khóa vi phạm (.txt):", font="-size 10 -weight bold").pack(anchor=W, pady=(10, 2))
+        self.bigdata_keywords_path = tk.StringVar()
+        self._create_file_picker(parent, self.bigdata_keywords_path)
+
+        # --- Spark Master ---
+        ttk.Label(parent, text="Spark Master URL (để trống nếu chạy local):", font="-size 10 -weight bold").pack(anchor=W, pady=(10, 2))
+        self.spark_master_url = tk.StringVar()
+        ttk.Entry(parent, textvariable=self.spark_master_url, font="-size 11").pack(fill=X, pady=(0, 15), ipady=4)
+
+        # --- Action Button ---
+        ttk.Button(parent, text="Bắt đầu Tác vụ Spark", command=self._on_run_spark_job, bootstyle="danger").pack(anchor=W, ipady=5, pady=10)
+
+        # --- Output/Log Display ---
+        self.bigdata_result = ttk.Text(parent, height=15, font="-size 10", wrap="word", relief=FLAT)
+        self.bigdata_result.pack(fill=BOTH, expand=YES, pady=(5,0))
+        self.bigdata_result.configure(state='disabled')
 
     def _on_check_url(self):
         url = self.url_var.get().strip()
@@ -105,16 +116,12 @@ class App(ttk.Window):
         text = self.text_input.get("1.0", tk.END).strip()
         if not text: return
 
-        method = self.text_analysis_method.get()
         user_keywords = self._load_user_keywords()
 
         try:
             self.config(cursor="watch")
             self.update_idletasks()
-            if method == "keyword":
-                result = analyze_text(text, user_keywords=user_keywords)
-            else: # AI
-                result = analyze_text_with_ai(text, user_keywords=user_keywords)
+            result = analyze_text(text, user_keywords=user_keywords)
             self._display_summary_plus_json(self.text_result, result)
         except Exception as e:
             self._display_error(self.text_result, e)
@@ -155,6 +162,79 @@ class App(ttk.Window):
         # ... (Styling and display logic remains the same) ...
 
         widget.configure(state='disabled')
+
+    def _create_file_picker(self, parent, var):
+        row = ttk.Frame(parent)
+        row.pack(fill=X, pady=(0, 5))
+
+        entry = ttk.Entry(row, textvariable=var, font="-size 11")
+        entry.pack(side=LEFT, fill=X, expand=YES, ipady=4)
+
+        def on_click():
+            path = filedialog.askopenfilename()
+            if path:
+                var.set(path)
+
+        ttk.Button(row, text="...", command=on_click, bootstyle="info").pack(side=LEFT, padx=(5,0))
+
+    def _on_run_spark_job(self):
+        urls_path = self.bigdata_urls_path.get()
+        keywords_path = self.bigdata_keywords_path.get()
+        master_url = self.spark_master_url.get().strip()
+
+        if not urls_path or not keywords_path:
+            messagebox.showwarning("Thiếu thông tin", "Vui lòng chọn cả tệp URLs và tệp từ khóa.")
+            return
+
+        output_dir = os.path.join("bigdata", "violated_urls.csv")
+
+        # Construct spark-submit command
+        command = [
+            "spark-submit",
+            os.path.join("bigdata", "process_urls.py"),
+            "--urls", urls_path,
+            "--keywords", keywords_path,
+            "--output", output_dir
+        ]
+        if master_url:
+            command.extend(["--master", master_url])
+
+        self._display_bigdata_message("Bắt đầu tác vụ Spark...")
+
+        try:
+            # We run this in a non-blocking way in a real app, but for simplicity:
+            process = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding='utf-8'
+            )
+
+            # Read output line by line
+            while True:
+                output = process.stdout.readline()
+                if output == '' and process.poll() is not None:
+                    break
+                if output:
+                    self._display_bigdata_message(output.strip())
+
+            stderr = process.communicate()[1]
+            if process.returncode != 0:
+                self._display_bigdata_message(f"LỖI SPARK:\n{stderr}")
+            else:
+                self._display_bigdata_message(f"\nTác vụ Spark hoàn tất. Kết quả được lưu tại:\n{os.path.abspath(output_dir)}")
+
+        except Exception as e:
+            self._display_bigdata_message(f"Lỗi khi chạy spark-submit:\n{e}")
+
+    def _display_bigdata_message(self, message):
+        self.bigdata_result.configure(state='normal')
+        self.bigdata_result.insert(tk.END, message + "\n")
+        self.bigdata_result.see(tk.END) # Auto-scroll
+        self.bigdata_result.configure(state='disabled')
+        self.update_idletasks()
+
 
 if __name__ == "__main__":
     App().mainloop()
